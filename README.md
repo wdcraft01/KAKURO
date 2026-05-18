@@ -1,0 +1,2 @@
+# KAKURO
+Traditional Kakuro game
