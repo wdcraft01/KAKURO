@@ -177,6 +177,82 @@ class KakuroGenerator {
             }
         }
 
+        // (4) Prune "illegal" stand-alone orphan entry cells
+        for (let r = minPlayableRow; r < maxPlayableRow; r++) {
+            for (let c = minPlayableCol; c < maxPlayableCol; c++) {
+
+                if (this.grid[r][c].type === 'entry') {
+
+                    // Count length of horizontal seq passing thru here
+                    let leftC  = c;
+                    let rightC = c;
+                    while (leftC >= minPlayableCol
+                           && this.grid[r][leftC].type === 'entry') {
+                        leftC--;
+                    }
+                    while (rightC <= maxPlayableCol
+                           && this.grid[r][rightC].type === 'entry') {
+                        rightC++;
+                    }
+                    const hRunLength = rightC - leftC - 1;
+
+                    // Count length of vertical seq passing thru here
+                    let upR  = r;
+                    let downR = r;
+                    while (upR >= minPlayableRow
+                           && this.grid[upR][c].type === 'entry') {
+                        upR--;
+                    }
+                    while (downR <= maxPlayableRow
+                           && this.grid[downR][c].type === 'entry') {
+                        downR++;
+                    }
+                    const vRunLength = downR - upR - 1;
+
+                    // Kakuro Rule check: if this cell is an isolated
+                    // single 'entry' cell, convert it (and it's mirror
+                    // image) back into a plain block
+                    if (hRunLength === 1 && vRunLength === 1) {
+                        this.grid[r][c].type = 'blank';
+
+                        const mirroredR = maxPlayableRow - (r - minPlayableRow);
+                        const mirroredC = maxPlayableCol - (c - minPlayableCol);
+                        this.grid[mirroredR][mirroredC].type = 'blank';
+                    }
+
+                }
+            }
+        }
+
+        // (5) Identify Clue Block locations and mutate blank blocks
+        //     to clue blocks
+        for (let r = 0; r < this.height; r++) {
+            for (let c = 0; c < this.width; c++) {
+
+                // Only concerned with non-entry cells
+                if (this.grid[r][c].type === 'blank') {
+
+                    // Check A: playable 'entry' cell directly to right?
+                    const hasHorizontalRun = (
+                        c + 1 < this.width
+                        && this.grid[r][c+1].type === 'entry');
+
+                    // Check B: playable 'entry' cell directly below?
+                    const hasVerticalRun = (
+                        r + 1 < this.height 
+                        && this.grid[r+1][c].type === 'entry');
+                    
+                    if (hasHorizontalRun || hasVerticalRun) {
+                        this.grid[r][c].type = 'clue';
+                        // Set clues to 0 instead of null to facilate later
+                        // updates
+                        if (hasHorizontalRun) this.grid[r][c].rowClue = 0;
+                        if (hasVerticalRun)   this.grid[r][c].colClue = 0;
+                    }
+                }
+            }
+        }
+
         // Test Calculation: pick a test coordinate (1, 1) and
         // calculate its 180-deg diametrically opposite partner.
         const testR = 1;
@@ -193,12 +269,16 @@ class KakuroGenerator {
         console.log("Step 2 Complete: Symmetrical bounds calculated.");
         console.log("Step 3 Complete: Symmetrical 'entry' tracks carved "
                     + "into memory.");
+        console.log("Step 4 Complete: Isolated 'entry' cells converted "
+                    + "to solid blank blocks.");
         console.log("Textual preview of the grid thus far: ")
         for (let r = 0; r < this.height; r++) {
             let rowStr = "";
             for (let c = 0; c < this.width; c++) {
                 if (this.grid[r][c].type === 'entry') {
                     rowStr += "0 ";
+                } else if (this.grid[r][c].type === 'clue') {
+                    rowStr += "C "
                 } else {
                     rowStr += "1 ";
                 }
