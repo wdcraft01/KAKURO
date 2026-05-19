@@ -253,16 +253,6 @@ class KakuroGenerator {
             }
         }
 
-        // Test Calculation: pick a test coordinate (1, 1) and
-        // calculate its 180-deg diametrically opposite partner.
-        const testR = 1;
-        const testC = 1;
-
-        // Symmetry Math formula:
-        // subtract distance from start margin from end margin
-        const mirroredR = maxPlayableRow - (testR - minPlayableRow);
-        const mirroredC = maxPlayableCol - (testC - minPlayableCol);
-
         // Check:
         console.log("Step 1 Complete: Data grid initialized to "
                     + "solid blank blocks.");
@@ -296,45 +286,93 @@ class KakuroGenerator {
     }
 }
 
-// Runtime Viewport Rendering Injection Loop
-// Generate the DOM board using the static map
-boardLayout.forEach((row, rowIndex) => {
-    row.forEach((cellType, colIndex) => {
+// Choose puzzle size
+const puzzleSize = [10, 10]; // (width, height)
+const activeGenerator = new KakuroGenerator(puzzleSize[0], puzzleSize[1])
 
-        const cell = document.createElement('div');
+// Trigger layout carver and adjacency mutation engines
+activeGenerator.carveBoardLayout();
 
-        if (cellType === 0) {
-            cell.className = 'entry-cell';
-            const input = document.createElement('input');
-            input.type = 'text';
-            input.maxLength = 1;
-            // Restrict input to numbers 1-9 via regex review
-            input.addEventListener(
-                'input', (e) => {
-                    e.target.value = e.target.value.replace(/[^1-9]/g,'');
+// Graphical Injection Engine
+function renderBoardToDOM(generator) {
+    const gridContainer = document.getElementById('kakuro-grid');
+
+    // Clear out any old HTML nodes inside the container
+    gridContainer.innerHTML = "";
+
+    // Dynamically pass our instance dimension to our fluid CSS
+    // custom properties
+    gridContainer.style.setProperty('--grid-cols', generator.width);
+    gridContainer.style.setProperty('--grid-rows', generator.height);
+
+    // Loop through the data engine matrix and generate corresponding
+    // HTML elements
+    for (let r = 0; r < generator.height; r++) {
+        for (let c = 0; c < generator.width; c++) {
+
+            // Retrieve our rich data state object for this coord
+            const cellData = generator.grid[r][c];
+            const cellElement = document.createElement('div');
+
+            if (cellData.type === 'entry') {
+                // Playable cell rendering
+                cellElement.className = 'entry-cell';
+
+                const input = document.createElement('input');
+                input.type = 'text';
+                input.maxLength = 1;
+                input.inputMode = 'numeric';
+
+                input.addEventListener('input', (e) => {
+                    // Force text to reflect user inputs inside our
+                    // data model layer
+                    cellData.userValue = e.target.value.replace(/[^1-9]/g, '');
+                    e.target.value = cellData.userValue;
                     checkSolution();
-            });
-            cell.appendChild(input);
-        } else {
-            // For showcase, let's hardcode a clue block to test CSS
-            if (rowIndex === 0 && colIndex === 1) {
-                cell.className = 'clue-cell';
-                cell.innerHTML = '<span class="col-clue">7</span>';
-            } else if (rowIndex === 1 && colIndex === 0) {
-                cell.className = 'clue-cell';
-                cell.innerHTML = '<span class="row-clue">4</span>';
+                });
+
+                cellElement.appendChild(input);
+            } else if (cellData.type == 'clue') {
+                // Clue cell rendering with diagonal CSS line styling
+                cellElement.className = 'clue-cell';
+
+                // If vert run exists downward, append a col-clue span elem
+                if (cellData.colClue !== null) {
+                    const colSpan = document.createElement('span');
+                    colSpan.className = 'col-clue';
+                    // Temporarily display empty placeholder character
+                    // until we have the math engine
+                    colSpan.innerText = "?";
+                    cellElement.appendChild(colSpan);
+                }
+
+                // If horiz run exists rightward,
+                // append a row-clue span elem
+                if (cellData.rowClue !== null) {
+                    const rowSpan = document.createElement('span');
+                    rowSpan.className = 'row-clue';
+                    // Temporarily display empty placeholder character
+                    // until we have the math engine
+                    rowSpan.innerText = "?";
+                    cellElement.appendChild(rowSpan);
+                }
+
+            } else {
+                // Solid, inactive barrier block rendering
+                cellElement.className = 'blank-cell';
             }
-            else {
-                cell.className = 'blank-cell';
-            }
+
+            // Append the compiled cell node stright into the fluid
+            // CSS grid wrapper
+            gridContainer.appendChild(cellElement);
         }
+    }
+}
 
-        gridContainer.appendChild(cell);
+// Execute the rendering
+renderBoardToDOM(activeGenerator);
 
-    });
-});
-
-// Cache the UI hint toglle element
+// Cache the UI hint toggle element
 const hintToggle = document.getElementById('toggle-hints');
 
 // Add even listener to checkbox to immediately evaluate board
@@ -469,7 +507,3 @@ function checkSolution() {
     }
 
 }
-
-// Test-drive carveBoardLayout() method
-const testGen = new KakuroGenerator(10, 10);
-testGen.carveBoardLayout();
