@@ -390,7 +390,7 @@ function renderBoardToDOM(generator) {
                     // data model layer
                     cellData.userValue = e.target.value.replace(/[^1-9]/g, '');
                     e.target.value = cellData.userValue;
-                    checkSolution();
+                    checkSolution(generator);
                 });
 
                 cellElement.appendChild(input);
@@ -439,64 +439,55 @@ const hintToggle = document.getElementById('toggle-hints');
 
 // Add even listener to checkbox to immediately evaluate board
 if (hintToggle) {
-    hintToggle.addEventListener('change', checkSolution);
+    hintToggle.addEventListener('change', () => {
+        checkSolution(activeGenerator);
+    });
 }
 
-function checkSolution() {
-    // Clear previous validation string before checking current state
+function checkSolution(generator) {
+    // Clear previous validation styling before checking current state
     document.querySelectorAll('.entry-cell').forEach(cell =>
         cell.classList.remove('error'));
     
-    // If player does not want hints enables, stop right here
+    // If player does not want hints enabled, stop right here
     if (hintToggle && !hintToggle.checked) {
         return;
     }
 
     // Otherwise ...
-    // Capture current values entered by user across the DOM board
-    // Once we switch to the dynamic generator, this data will live
-    // inside the KakuroCell array instead
-    const rows = document.querySelectorAll('#kakuro-grid > div');
+    const totalCols = generator.width;
+    const totalRows = generator.height;
 
-    // Convert DOM linear node list back into our 5 x 5 lookup
-    // grid for cross-referencing
-    let uiGrid = [];
-    let cellIndex = 0;
-    for (let r = 0; r < totalRows; r++) {
-        let rowData = [];
-        for (let c = 0; c < totalCols; c++) {
-            rowData.push(rows[cellIndex++]);
-        }
-        uiGrid.push(rowData);
-    }
+    // Cache the visible grid items once so we can color them
+    // instantly by linear index
+    const domCells = document.getElementById('kakuro-grid').children;
 
-    // Scan for errors: run through each coordinate
     for (let r = 0; r < totalRows; r++) {
         for (let c = 0; c < totalCols; c++) {
-            const currentCell = uiGrid[r][c];
 
-            // Look for duplicates or sums extending away
-            // from clue blocks
-            if (currentCell.classList.contains('clue-cell')) {
+            const cellData = generator.grid[r][c];
 
-                // Fetch the clue limits from the UI text
-                const colClueElement = currentCell.querySelector('.col-clue');
-                const rowClueElement = currentCell.querySelector('.row-clue');
+            if (cellData.type === 'clue') {
 
-                // Validate horizontal run (rightward)
-                if (rowClueElement) {
-                    const targetSum = parseInt(rowClueElement.innerText);
+                // horizontal run validation
+                if (cellData.rowClue !== null) {
+
+                    const targetSum = cellData.rowClue;
                     let scanCol = c + 1;
-                    let runCells = [];
+                    let runVisualElements = []; // Stores visual HTML boxes to color later
                     let seenNumbers = new Set();
                     let currentRunSum = 0;
                     let isRunFilled = true;
 
-                    while (scanCol < totalCols && uiGrid[r][scanCol].classList.contains('entry-cell')) {
-                        const targetCell = uiGrid[r][scanCol];
-                        const inputVal   = targetCell.querySelector('input').value;
+                    while (scanCol < totalCols
+                           && generator.grid[r][scanCol].type === 'entry') {
+                        const targetCell = generator.grid[r][scanCol];
+                        const inputVal   = targetCell.userValue;
 
-                        runCells.push(targetCell);
+                        // Calc this cell's linear index
+                        const visualIndex = (r * totalCols) + scanCol;
+                        // Store corresponding visual HTML component
+                        runVisualElements.push(domCells[visualIndex]);
 
                         if (inputVal !== '') {
                             const num = parseInt(inputVal);
@@ -505,8 +496,8 @@ function checkSolution() {
                             // Rule Violation: Duplicate digits in same
                             // horizontal track
                             if (seenNumbers.has(num)) {
-                                runCells.forEach(cell =>
-                                    cell.classList.add('error'));
+                                runVisualElements.forEach(cell =>
+                                    cell.classList.add('error'))
                             }
                             seenNumbers.add(num);
                         } else {
@@ -515,60 +506,62 @@ function checkSolution() {
                         scanCol++;
                     }
 
-                    // Rule Violation: Run is filled but total sum incorrect
+                    // Rule Violation: Segment is fully populated but
+                    // adds up incorrectly
                     if (isRunFilled && currentRunSum !== targetSum) {
-                        runCells.forEach(cell => cell.classList.add('error'));
-                    }
-                    // Rule Violation: Current numbers already exceed target limit
-                    if (!isRunFilled && currentRunSum > targetSum) {
-                        runCells.forEach(cell => cell.classList.add('error'));
+                        runVisualElements.forEach(cell =>
+                            cell.classList.add('error'));
                     }
                 }
 
-                // Validate vertical run (downward)
-                if (colClueElement) {
-                    const targetSum = parseInt(colClueElement.innerText);
+                // Vertical Run validation
+                if (cellData.colClue !== null) {
+
+                    const targetSum = cellData.colClue;
                     let scanRow = r + 1;
-                    let runCells = [];
+                    let runVisualElements = []; // Stores visual HTML boxes to color later
                     let seenNumbers = new Set();
                     let currentRunSum = 0;
                     let isRunFilled = true;
 
-                    while (scanRow < totalRows && uiGrid[scanRow][c].classList.contains('entry-cell')) {
-                        const targetCell = uiGrid[scanRow][c];
-                        const inputVal = targetCell.querySelector('input').value;
+                    while (scanRow < totalRows
+                           && generator.grid[scanRow][c].type === 'entry') {
+                        const targetCell = generator.grid[scanRow][c];
+                        const inputVal   = targetCell.userValue;
 
-                        runCells.push(targetCell);
+                        // Calc this cell's linear index
+                        const visualIndex = (scanRow * totalCols) + c;
+                        // Store corresponding visual HTML component
+                        runVisualElements.push(domCells[visualIndex]);
 
                         if (inputVal !== '') {
                             const num = parseInt(inputVal);
                             currentRunSum += num;
 
-                            // Rule Violation: Duplicate digits in same vertical track
+                            // Rule Violation: Duplicate digits in same
+                            // horizontal track
                             if (seenNumbers.has(num)) {
-                                runCells.forEach(cell => cell.classList.add('error'));
+                                runVisualElements.forEach(cell =>
+                                    cell.classList.add('error'))
                             }
                             seenNumbers.add(num);
                         } else {
-                            isRunFilled = false;
+                            isRunFilled = false; // Run contains empty cells
                         }
                         scanRow++;
                     }
 
-                    // Rule violation: Vertical track sums incorrectly
+                    // Rule Violation: Segment is fully populated but
+                    // adds up incorrectly
                     if (isRunFilled && currentRunSum !== targetSum) {
-                        runCells.forEach(cell => cell.classList.add('error'));
-                    }
-                    if (!isRunFilled && currentRunSum > targetSum) {
-                        runCells.forEach(cell => cell.classList.add('error'));
+                        runVisualElements.forEach(cell =>
+                            cell.classList.add('error'));
                     }
                 }
-        
             }
         }
     }
-
-}
+} // end of checkSolution() fxn
 
 /* =========================== */
 /*    Utility Functions        */
