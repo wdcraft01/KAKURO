@@ -70,35 +70,41 @@ class KakuroGenerator {
     }
 
     fillEntryCells(row, col) {
-        // Base case: if we reach the end of the grid, we are done
+
         if (row === this.height) return true;
 
-        // Move to next row if at the end of columns
-        let nextRow = col === this.width - 1 ? row + 1 : row;
-        // Move to next column or return to column 0
-        let nextCol = col === this.width - 1 ? 0 : col + 1;
+        let nextRow;
+        let nextCol;
+        
+        if (col < this.width - 1) {
+            nextRow = row;
+            nextCol = col + 1;
+        } else {
+            nextRow = row + 1;
+            nextCol = 0;
+        }
 
-        let cell = this.grid[row][col];
-        if (cell.type != 'entry') {
+        if (this.grid[row][col].type !== 'entry') {
             return this.fillEntryCells(nextRow, nextCol);
         }
 
-        // Shuffle an array of [1..9] to introduce randomness
-        let digits =
-           [1, 2, 3, 4, 5, 6, 7, 8, 9].sort(() => Math.random() - 0.5);
-        
+        let digits = shuffle([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
         for (let num of digits) {
             if (this.isValidPlacement(row, col, num)) {
-                cell.correctValue = num;
+                this.grid[row][col].correctValue = num;
 
                 if (this.fillEntryCells(nextRow, nextCol)) {
                     return true;
-                }
-
-                cell.correctValue = null; // Backtrack
+                };
+                // otherwise, undo our 'guess', and try next num
+                this.grid[row][col].correctValue = null;
             }
         }
-        return false; // Triggers backtracking to previous cell
+    
+    // we have failed to complete the filling-in process
+    return false;
+
     }
 
     isValidPlacement(row, col, num) {
@@ -141,7 +147,7 @@ class KakuroGenerator {
         // (3) Run the symmetry loop through the first half of rows
         // Adjust this factor to change how many cells become entry
         // spaces (lower = more entry spaces)
-        const densityFactor = 0.45;
+        const densityFactor = 0.25;
 
         for (let r = minPlayableRow; r <= maxPlayableRow; r++) {
 
@@ -177,52 +183,61 @@ class KakuroGenerator {
             }
         }
 
-        // (4) Prune "illegal" stand-alone orphan entry cells
-        for (let r = minPlayableRow; r < maxPlayableRow; r++) {
-            for (let c = minPlayableCol; c < maxPlayableCol; c++) {
+        // (4) Iteratively Prune "illegal" orphan entry cells
+        let boardChanged = true;
 
-                if (this.grid[r][c].type === 'entry') {
+        while (boardChanged) {
+            boardChanged = false;
 
-                    // Count length of horizontal seq passing thru here
-                    let leftC  = c;
-                    let rightC = c;
-                    while (leftC >= minPlayableCol
-                           && this.grid[r][leftC].type === 'entry') {
-                        leftC--;
+            for (let r = minPlayableRow; r <= maxPlayableRow; r++) {
+                for (let c = minPlayableCol; c <= maxPlayableCol; c++) {
+
+                    if (this.grid[r][c].type === 'entry') {
+
+                        // Count length of horizontal seq passing thru here
+                        let leftC  = c;
+                        let rightC = c;
+                        while (leftC >= minPlayableCol
+                            && this.grid[r][leftC].type === 'entry') {
+                            leftC--;
+                        }
+                        while (rightC <= maxPlayableCol
+                            && this.grid[r][rightC].type === 'entry') {
+                            rightC++;
+                        }
+                        const hRunLength = rightC - leftC - 1;
+
+                        // Count length of vertical seq passing thru here
+                        let upR  = r;
+                        let downR = r;
+                        while (upR >= minPlayableRow
+                            && this.grid[upR][c].type === 'entry') {
+                            upR--;
+                        }
+                        while (downR <= maxPlayableRow
+                            && this.grid[downR][c].type === 'entry') {
+                            downR++;
+                        }
+                        const vRunLength = downR - upR - 1;
+
+                        // Check our structural rules
+                        const isTooShort = (hRunLength === 1 || vRunLength === 1);
+                        const isTooLong  = (hRunLength > 9 || vRunLength > 9);
+
+                        if (isTooShort || isTooLong) {
+                            this.grid[r][c].type = 'blank';
+                            // Find mirrored position
+                            const mirroredR = maxPlayableRow - (r - minPlayableRow);
+                            const mirroredC = maxPlayableCol - (c - minPlayableCol);
+                            this.grid[mirroredR][mirroredC].type = 'blank';
+
+                            // signal that we have changed the board
+                            boardChanged = true;
+                        }
                     }
-                    while (rightC <= maxPlayableCol
-                           && this.grid[r][rightC].type === 'entry') {
-                        rightC++;
-                    }
-                    const hRunLength = rightC - leftC - 1;
-
-                    // Count length of vertical seq passing thru here
-                    let upR  = r;
-                    let downR = r;
-                    while (upR >= minPlayableRow
-                           && this.grid[upR][c].type === 'entry') {
-                        upR--;
-                    }
-                    while (downR <= maxPlayableRow
-                           && this.grid[downR][c].type === 'entry') {
-                        downR++;
-                    }
-                    const vRunLength = downR - upR - 1;
-
-                    // Kakuro Rule check: if this cell is an isolated
-                    // single 'entry' cell, convert it (and it's mirror
-                    // image) back into a plain block
-                    if (hRunLength === 1 && vRunLength === 1) {
-                        this.grid[r][c].type = 'blank';
-
-                        const mirroredR = maxPlayableRow - (r - minPlayableRow);
-                        const mirroredC = maxPlayableCol - (c - minPlayableCol);
-                        this.grid[mirroredR][mirroredC].type = 'blank';
-                    }
-
                 }
             }
-        }
+        } // end while(boardChanged) loop
 
         // (5) Identify Clue Block locations and mutate blank blocks
         //     to clue blocks
@@ -232,15 +247,18 @@ class KakuroGenerator {
                 // Only concerned with non-entry cells
                 if (this.grid[r][c].type === 'blank') {
 
-                    // Check A: playable 'entry' cell directly to right?
+                    // Check A: 2 playable 'entry' cells directly to right?
                     const hasHorizontalRun = (
-                        c + 1 < this.width
-                        && this.grid[r][c+1].type === 'entry');
+                        c + 2 < this.width
+                        && this.grid[r][c+1].type === 'entry'
+                        && this.grid[r][c+2].type === 'entry'
+                    );
 
                     // Check B: playable 'entry' cell directly below?
                     const hasVerticalRun = (
-                        r + 1 < this.height 
-                        && this.grid[r+1][c].type === 'entry');
+                        r + 2 < this.height 
+                        && this.grid[r+1][c].type === 'entry'
+                        && this.grid[r+2][c].type === 'entry');
                     
                     if (hasHorizontalRun || hasVerticalRun) {
                         this.grid[r][c].type = 'clue';
@@ -278,11 +296,55 @@ class KakuroGenerator {
     }
     
     calculateSumsFromSolution() {
-        // TBD
+        // From the underlying grid solution, calculate the run sums
+        // and update the corresponding clue cells.
+
+        for (let r = 0; r < this.height; r++) {
+            for (let c = 0; c < this.width; c++) {
+
+                const temp_cell = this.grid[r][c];
+
+                if (temp_cell.type === 'clue') {
+
+                    if (temp_cell.rowClue !== null) {
+                        // compute row sum
+                        let rowSum = 0;
+                        let scanCol = c + 1;
+                        while (scanCol < this.width
+                               && this.grid[r][scanCol].type === 'entry') {
+                            rowSum += this.grid[r][scanCol].correctValue;
+                            scanCol++;
+                        }
+                        // update clue cell
+                        temp_cell.rowClue = rowSum;
+                    }
+
+                    if (temp_cell.colClue !== null) {
+                        // compute col sum
+                        let colSum = 0;
+                        let scanRow = r + 1;
+                        while (scanRow < this.height
+                               && this.grid[scanRow][c].type === 'entry') {
+                            colSum += this.grid[scanRow][c].correctValue;
+                            scanRow++;
+                        }
+                        // update clue cell
+                        temp_cell.colClue = colSum;
+                    }
+                }
+            }
+        }
     }
 
     clearEntryCellsForPlay() {
-        // TBD
+        // Clear entry cells for displaying initial puzzle
+        for (let r = 0; r < this.height; r++) {
+            for (let c = 0; c < this.width; c++) {
+                if (this.grid[r][c].type === 'entry') {
+                    this.grid[r][c].userValue = '';
+                }
+            }
+        }
     }
 }
 
@@ -290,8 +352,8 @@ class KakuroGenerator {
 const puzzleSize = [10, 10]; // (width, height)
 const activeGenerator = new KakuroGenerator(puzzleSize[0], puzzleSize[1])
 
-// Trigger layout carver and adjacency mutation engines
-activeGenerator.carveBoardLayout();
+// Generate the puzzle
+activeGenerator.generatePuzzle();
 
 // Graphical Injection Engine
 function renderBoardToDOM(generator) {
@@ -342,7 +404,7 @@ function renderBoardToDOM(generator) {
                     colSpan.className = 'col-clue';
                     // Temporarily display empty placeholder character
                     // until we have the math engine
-                    colSpan.innerText = "?";
+                    colSpan.innerText = cellData.colClue;
                     cellElement.appendChild(colSpan);
                 }
 
@@ -353,7 +415,7 @@ function renderBoardToDOM(generator) {
                     rowSpan.className = 'row-clue';
                     // Temporarily display empty placeholder character
                     // until we have the math engine
-                    rowSpan.innerText = "?";
+                    rowSpan.innerText = cellData.rowClue;
                     cellElement.appendChild(rowSpan);
                 }
 
@@ -369,7 +431,7 @@ function renderBoardToDOM(generator) {
     }
 }
 
-// Execute the rendering
+// // Execute the rendering
 renderBoardToDOM(activeGenerator);
 
 // Cache the UI hint toggle element
@@ -381,7 +443,7 @@ if (hintToggle) {
 }
 
 function checkSolution() {
-    // Clear previous validation stying before checking current state
+    // Clear previous validation string before checking current state
     document.querySelectorAll('.entry-cell').forEach(cell =>
         cell.classList.remove('error'));
     
@@ -506,4 +568,18 @@ function checkSolution() {
         }
     }
 
+}
+
+/* =========================== */
+/*    Utility Functions        */
+/* =========================== */
+
+function shuffle(array) {
+    for (let i = array.length - 1; i > 0; i--) {
+        // Pick random index from 0 to i
+        const j = Math.floor(Math.random() * (i + 1));
+        // Swap elements array[i] and array[j]
+        [array[i], array[j]] = [array[j], array[i]]
+    }
+    return array;
 }
