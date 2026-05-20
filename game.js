@@ -123,8 +123,9 @@ class KakuroGenerator {
 
     carveBoardLayout() {
         // Construct the layout for the puzzle, using general height
-        // and width specifications and maintaining 180-deg rotational
-        // symmetry for the playable inner core.
+        // and width specifications, a tree-growing approach to
+        // developing the entry cells, and maintaining 180-deg
+        // rotational symmetry for the playable inner core.
 
         // (1) Clear all values and initialize the matrix to
         //     solid blocks.
@@ -144,102 +145,141 @@ class KakuroGenerator {
         const minPlayableCol = 1;
         const maxPlayableCol = this.width - 1;
 
-        // (3) Run the symmetry loop through the first half of rows
-        // Adjust this factor to change how many cells become entry
-        // spaces (lower = more entry spaces)
-        const densityFactor = 0.25;
+        // (3) Choose an initial seed location, and make that cell
+        //     (and its mirror image) into an 'entry' cell.
+        const seedR = getRandomInt(minPlayableRow, maxPlayableRow);
+        const seedC = getRandomInt(minPlayableCol, maxPlayableCol);
+        const mirrorSeedR = maxPlayableRow - (seedR - minPlayableRow);
+        const mirrorSeedC = maxPlayableCol - (seedC - minPlayableCol);
+        this.grid[seedR][seedC].type = 'entry';
+        this.grid[mirrorSeedR][mirrorSeedC].type = 'entry';
+
+        // (4) Establish the set of "frontier pair" cells (adjacent
+        // pairs of non-entry cells at least one of the pair of which
+        // is horizontally or vertically adjacent to current
+        // 'entry' cells).
+        const frontier = [];
+        frontier.push(...this.getFrontierPairs(seedR, seedC, frontier));
+        frontier.push(...this.getFrontierPairs(
+            mirrorSeedR, mirrorSeedC, frontier));
+        
+        // (5) Establish a density factor to use in randomly setting
+        //     cells to be 'entry' cells or not (higher = more entry
+        //     spaces).
+        const densityFactor = 0.45;
+
+        // (6) A "tree-growing" loop to grow our collection of entry
+        //     cells while keeping the collection connected.
+
+        let currentEntryCount = 2;
+        const maxEntries = Math.floor((this.width * this.height) * 0.45);
+
+        while (frontier.length > 0 && currentEntryCount < maxEntries) {
+
+            const randIndex = getRandomInt(0, frontier.length-1)
+            const [chosenPair] = frontier.splice(randIndex, 1);
+            let r1 = chosenPair[0][0];
+            let c1 = chosenPair[0][1];
+            let r2 = chosenPair[1][0];
+            let c2 = chosenPair[1][1];
+
+            // Lazy cleanup: If previous mirror pass already claimed
+            // either cell in the pair, we simply ignore it and move
+            // to next loop iteration
+            if (this.grid[r1][c1].type !== 'blank'
+                || this.grid[r2][c2].type !== 'blank') {
+                continue;
+            }
+            
+            if (Math.random() < densityFactor) {
+                const mirrorR1 = maxPlayableRow - (r1 - minPlayableRow);
+                const mirrorC1 = maxPlayableCol - (c1 - minPlayableCol);
+                const mirrorR2 = maxPlayableRow - (r2 - minPlayableRow);
+                const mirrorC2 = maxPlayableCol - (c2 - minPlayableCol);
+
+                // Mutate primary pair of cells.
+                this.grid[r1][c1].type = 'entry';
+                this.grid[r2][c2].type = 'entry';
+                currentEntryCount += 2;
+
+                // Immediately update set of frontier pairs
+                frontier.push(...this.getFrontierPairs(r1, c1, frontier));
+                frontier.push(...this.getFrontierPairs(r2, c2, frontier));
+
+                // Handle normal cell vs. center tile of odd-sized board
+                if (r1 !== mirrorR1 || c1 !== mirrorC1) {
+                    // we are not dealing with center cell of board
+                    this.grid[mirrorR1][mirrorC1].type = 'entry';
+                    currentEntryCount += 1;
+                    frontier.push(...this.getFrontierPairs(
+                        mirrorR1, mirrorC1, frontier));
+                }
+                if (r2 !== mirrorR2 || c2 !== mirrorC2) {
+                    // we are not dealing with center cell of board
+                    this.grid[mirrorR2][mirrorC2].type = 'entry';
+                    currentEntryCount += 1;
+                    frontier.push(...this.getFrontierPairs(
+                        mirrorR2, mirrorC2, frontier));
+                }
+            }
+            
+        } // end tree-growing while() loop
+
+        // (7) Surgical edge-shaving: trim any remaining unplayable
+        //     1-cell stubs to ensure every single playable entry has
+        //     at least a 2-cell runway in both directions
 
         for (let r = minPlayableRow; r <= maxPlayableRow; r++) {
-
-            // Breaking Condition: If we cross the vertical halfway
-            // point of the core, stop looping completely so we don't
-            // overwrite our mirrored pairs.
-            if (r > Math.ceil(maxPlayableRow / 2)) {
-                break;
-            }
-
             for (let c = minPlayableCol; c <= maxPlayableCol; c++) {
 
-                // Conditional Break: If we are on the exact middle
-                // row of an odd-sized grid, we only need to scan up
-                // to the horizontal halfway column.
-                if (r === Math.ceil(maxPlayableRow / 2)
-                    && c > Math.ceil(maxPlayableCol / 2)) {
-                        break;
+                if (this.grid[r][c].type === 'entry') {
+
+                    // Count length of horizontal seq passing thru here
+                    let leftC  = c;
+                    let rightC = c;
+                    while (leftC >= minPlayableCol
+                        && this.grid[r][leftC].type === 'entry') {
+                        leftC--;
                     }
-                
-                // Randomly decide if this tile shold be a playable
-                // entry run
-                if (Math.random() > densityFactor) {
+                    while (rightC <= maxPlayableCol
+                        && this.grid[r][rightC].type === 'entry') {
+                        rightC++;
+                    }
+                    const hRunLength = rightC - leftC - 1;
 
-                    // Calc mirrored coords
-                    const mirroredR = maxPlayableRow - (r - minPlayableRow);
-                    const mirroredC = maxPlayableCol - (c - minPlayableCol);
+                    // Count length of vertical seq passing thru here
+                    let upR  = r;
+                    let downR = r;
+                    while (upR >= minPlayableRow
+                        && this.grid[upR][c].type === 'entry') {
+                        upR--;
+                    }
+                    while (downR <= maxPlayableRow
+                        && this.grid[downR][c].type === 'entry') {
+                        downR++;
+                    }
+                    const vRunLength = downR - upR - 1;
 
-                    // Mutate cell and its mirror image
-                    this.grid[r][c].type = 'entry';
-                    this.grid[mirroredR][mirroredC].type = 'entry';
+                    // run-length violation check
+                    const isTooShort = (hRunLength === 1 || vRunLength === 1);
+                    // const isTooLong  = (hRunLength > 9 || vRunLength > 9);
+
+                    if (isTooShort) {
+                        this.grid[r][c].type = 'blank';
+                        // Find mirrored position
+                        const mirroredR = maxPlayableRow - (r - minPlayableRow);
+                        const mirroredC = maxPlayableCol - (c - minPlayableCol);
+                        this.grid[mirroredR][mirroredC].type = 'blank';
+
+                        // signal that we have changed the board
+                        // boardChanged = true;
+                    }
                 }
             }
         }
+        // } // end while(boardChanged) loop
 
-        // (4) Iteratively Prune "illegal" orphan entry cells
-        let boardChanged = true;
-
-        while (boardChanged) {
-            boardChanged = false;
-
-            for (let r = minPlayableRow; r <= maxPlayableRow; r++) {
-                for (let c = minPlayableCol; c <= maxPlayableCol; c++) {
-
-                    if (this.grid[r][c].type === 'entry') {
-
-                        // Count length of horizontal seq passing thru here
-                        let leftC  = c;
-                        let rightC = c;
-                        while (leftC >= minPlayableCol
-                            && this.grid[r][leftC].type === 'entry') {
-                            leftC--;
-                        }
-                        while (rightC <= maxPlayableCol
-                            && this.grid[r][rightC].type === 'entry') {
-                            rightC++;
-                        }
-                        const hRunLength = rightC - leftC - 1;
-
-                        // Count length of vertical seq passing thru here
-                        let upR  = r;
-                        let downR = r;
-                        while (upR >= minPlayableRow
-                            && this.grid[upR][c].type === 'entry') {
-                            upR--;
-                        }
-                        while (downR <= maxPlayableRow
-                            && this.grid[downR][c].type === 'entry') {
-                            downR++;
-                        }
-                        const vRunLength = downR - upR - 1;
-
-                        // Check our structural rules
-                        const isTooShort = (hRunLength === 1 || vRunLength === 1);
-                        const isTooLong  = (hRunLength > 9 || vRunLength > 9);
-
-                        if (isTooShort || isTooLong) {
-                            this.grid[r][c].type = 'blank';
-                            // Find mirrored position
-                            const mirroredR = maxPlayableRow - (r - minPlayableRow);
-                            const mirroredC = maxPlayableCol - (c - minPlayableCol);
-                            this.grid[mirroredR][mirroredC].type = 'blank';
-
-                            // signal that we have changed the board
-                            boardChanged = true;
-                        }
-                    }
-                }
-            }
-        } // end while(boardChanged) loop
-
-        // (5) Identify Clue Block locations and mutate blank blocks
+        // (8) Identify Clue Block locations and mutate blank blocks
         //     to clue blocks
         for (let r = 0; r < this.height; r++) {
             for (let c = 0; c < this.width; c++) {
@@ -293,6 +333,87 @@ class KakuroGenerator {
             }
             console.log(rowStr);
         }
+    }
+
+    getFrontierPairs(row, col, activeFrontierPairs) {
+        // Find non-entry adjacent pairs of cell locations, one
+        // of which is adjacent to the (row, col) cell, and
+        // add the pair to the activeFrontierPairs list if not
+        // already present in the list.
+
+        const possiblePairs = [
+            [[row, col-2],[row, col-1]],  // left
+            [[row, col+1],[row, col+2]],  // right
+            [[row-1, col],[row-2, col]],  // up
+            [[row+1, col],[row+2, col]],  // down
+            [[row, col+1],[row+1,col+1]], // right-down
+            [[row, col+1],[row-1,col+1]], // right-up
+            [[row-1, col],[row-1,col+1]], // up-right
+            [[row-1, col],[row-1,col-1]], // up-left
+            [[row, col-1],[row-1,col-1]], // left-up
+            [[row, col-1],[row+1,col-1]], // left-down
+            [[row+1, col],[row+1,col-1]], // down-left
+            [[row+1, col],[row+1,col+1]] // down-right
+        ]
+
+        const actualPairs = [];
+
+        for (let pair of possiblePairs) {
+            let r1 = pair[0][0];
+            let c1 = pair[0][1];
+            let r2 = pair[1][0];
+            let c2 = pair[1][1];
+            if (   r1 > 0 && r1 <= this.height-1
+                && c1 > 0 && c1 <= this.width-1
+                && r2 > 0 && r2 <= this.height-1
+                && c2 > 0 && c2 <= this.width-1 ) {
+                
+                if (this.grid[r1][c1].type === 'blank'
+                    && this.grid[r2][c2].type === 'blank') {
+
+                        // we can't compare the entire object in JS
+                        // so we have to look at the pieces :(
+                        const isDuplicate = activeFrontierPairs.some(
+                            activePair => activePair[0][0] === r1
+                                          && activePair[0][1] === c1 
+                                          && activePair[1][0] === r2
+                                          && activePair[1][1] === c2
+                        );
+                        if (!isDuplicate) {
+                            actualPairs.push(pair);
+                        }
+
+                    }
+            }
+
+        } // end for() loop
+
+        return actualPairs;
+    }
+
+    getFrontierNeighbors(row, col, activeFrontier) {
+        // Find non-entry ("frontier") neighbors abutting the cell
+        // at location (row, col), and add those locations to the
+        // activeFrontier list if not already in the list.
+
+        const shifts = [[-1,0], [1,0], [0,-1], [0,1]];
+        const neighbors = [];
+
+        for (let shift of shifts) {
+            let r = row + shift[0];
+            let c = col + shift[1];
+            if (r > 0 && r <= this.height-1 && c > 0 && c <= this.width-1) {
+                if (this.grid[r][c].type === 'blank') {
+                    const isDuplicate = activeFrontier.some(
+                        coord => coord[0] === r && coord[1] === c
+                    );
+                    if (!isDuplicate) {
+                        neighbors.push([r, c]);
+                    }
+                }
+            }
+        }
+        return neighbors;
     }
     
     calculateSumsFromSolution() {
@@ -575,4 +696,10 @@ function shuffle(array) {
         [array[i], array[j]] = [array[j], array[i]]
     }
     return array;
+}
+
+function getRandomInt(min, max) {
+    // Generate and return a random integer in the interval [min, max]
+    // (inclusive).
+    return Math.floor(Math.random() * (max - min + 1)) + min;
 }
