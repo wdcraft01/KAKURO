@@ -69,6 +69,46 @@ class KakuroGenerator {
         }
     }
 
+    initialSeedLocation() {
+        // Generate an initial "seed" location from which to
+        // continue generating the rest of the board layout,
+        // generating and returning the upper-left coordinate of
+        // an intended 2-4 linear strip of initial entry cells.
+
+        const quadrant = getRandomInt(0, 3);
+        const width = this.width;
+        const height = this.height;
+        // (row, col) = (i, j) will be upper left cell in 2 x 2 cluster
+        let i = Math.floor(height /  4) + getRandomInt(-1,1);
+        let j = Math.floor(width / 4) + getRandomInt(-1,1);
+         if (quadrant === 0) {
+            // upper-left quadrant: leave i and j alone
+         }
+         else if (quadrant === 1) {
+            // upper-right quadrant: shift rightward by width/2
+            j += Math.floor(width / 2);
+         }
+         else if (quadrant === 2) {
+             // lower-right quandrant:
+             // shift right by width/2; shift down by height/2
+             i += Math.floor(height /  2);
+             j += Math.floor(width / 2);
+         }
+         else { // quadrant === 3
+             // lower-left quadrant: shift down by height/2
+             i += Math.floor(height /  2);
+         }
+
+         // Clamp values so the 2 x 2 block never overwrites the
+         // outer border walls
+         i = Math.max(1, Math.min(i, height - 4));
+         j = Math.max(1, Math.min(j, width - 4));
+
+         // Return the upper-left corner coordinate for an intended
+         // length 2-4 linear strip of initial entry cells 
+         return { row: i, col: j};
+    }
+
     fillEntryCells(row, col) {
 
         if (row === this.height) return true;
@@ -121,6 +161,24 @@ class KakuroGenerator {
         return true;
     }
 
+    getSymmetricCoords(r, c) {
+
+        // Define symmetrical core boundaries (r > 0 and c > 0)
+        const minPlayableRow = 1;
+        const maxPlayableRow = this.height - 1;
+        const minPlayableCol = 1;
+        const maxPlayableCol = this.width - 1;
+
+        const mirrorR = maxPlayableRow - (r - minPlayableRow);
+        const mirrorC = maxPlayableCol - (c - minPlayableCol);
+
+        return { r: mirrorR, c: mirrorC };
+
+    }
+
+    getIntersectionCandidates() {
+    }
+
     carveBoardLayout() {
         // Construct the layout for the puzzle, using general height
         // and width specifications, a tree-growing approach to
@@ -138,35 +196,123 @@ class KakuroGenerator {
                 this.grid[r][c].colClue = null
             }
         }
+        // Check:
+        console.log("Step 1 Complete: Data grid initialized to "
+                    + "solid blank blocks.");
 
-        // (2) Define symmetrical core boundaries (r > 0 and c > 0)
-        const minPlayableRow = 1;
-        const maxPlayableRow = this.height - 1;
-        const minPlayableCol = 1;
-        const maxPlayableCol = this.width - 1;
+        // (2) Choose an initial seed location, intended as the
+        //     upper-left corner of an initial 2 x 2 block of entry
+        //     cells
+        const seed = this.initialSeedLocation();
+        // Check:
+        console.log("Step 2 Complete: Initial seed location selected, "
+                    + "with seed:" + JSON.stringify(seed, null));
 
-        // (3) Choose an initial seed location, and make that cell
-        //     (and its mirror image) into an 'entry' cell.
-        const seedR = getRandomInt(minPlayableRow, maxPlayableRow);
-        const seedC = getRandomInt(minPlayableCol, maxPlayableCol);
-        const mirrorSeedR = maxPlayableRow - (seedR - minPlayableRow);
-        const mirrorSeedC = maxPlayableCol - (seedC - minPlayableCol);
-        this.grid[seedR][seedC].type = 'entry';
-        this.grid[mirrorSeedR][mirrorSeedC].type = 'entry';
+        // (3) Define the 2-4 coordinates making up the initial 
+        // 2-4 linear block
+        const horizontalVertical = getRandomInt(0, 1);
+        const initLength = getRandomInt(2, 4);
+        const coordsToCarve = []
+        if (horizontalVertical === 0) {
+            // create an initial horizontal linear block
+            for (let dc = 0; dc < initLength; dc++) {
+                coordsToCarve.push({r: seed.row, c: seed.col + dc})
+            } 
+        } else {
+            // create an initial vertical linear block
+            for (let dr = 0; dr < initLength; dr++) {
+                coordsToCarve.push({r: seed.row + dr, c: seed.col})
+            }
+        }
+        // Check:
+        console.log("Step 3 Complete: Linear block seed established, "
+                    + "with coordsToCarve: ");
+        console.table(coordsToCarve);
 
-        // (4) Establish the set of "frontier pair" cells (adjacent
-        // pairs of non-entry cells at least one of the pair of which
-        // is horizontally or vertically adjacent to current
-        // 'entry' cells).
-        const frontier = [];
-        frontier.push(...this.getFrontierPairs(seedR, seedC, frontier));
-        frontier.push(...this.getFrontierPairs(
-            mirrorSeedR, mirrorSeedC, frontier));
+        // (4) Carve the seed entry cells, along with their symmetrical
+        //     collection
+        coordsToCarve.forEach(coord => {
+            this.grid[coord.r][coord.c].type = 'entry';
+            const mirrored = this.getSymmetricCoords(coord.r, coord.c);
+            this.grid[mirrored.r][mirrored.c].type = 'entry';
+        })
+        // Check:
+        console.log("Step 4 Complete: Carved out seed entry cells and "
+                    + "mirrored collection.");
         
-        // (5) Establish a density factor to use in randomly setting
+        // (5) Obtain the initial frontier cells
+        const frontiers = this.getOpenFrontiers();
+        // Check:
+        console.log("Step 5 Complete: obtained the initial frontier cells:");
+        console.table(frontiers);
+        
+        // (6) Establish a density factor to use in randomly setting
         //     cells to be 'entry' cells or not (higher = more entry
         //     spaces).
         const densityFactor = 0.45;
+        console.log("Step 6 Complete: estab'd density factor of "
+                    + densityFactor);
+        
+        // (7) Pick random frontier element
+        const randFrontierIndex = getRandomInt(0, frontiers.length - 1);
+        const randFrontier = frontiers[randFrontierIndex];
+        console.log("Step 7 Complete: random frontier element chosen, "
+                    + "with randFrontier being " + JSON.stringify(randFrontier));
+        
+        // (8) Pick random line span and random offset
+        //     These are not independent of each other, so we pick
+        //     a random line length 2 <= l <= 9, then based on the
+        //     position of the randFrontier element, we pick a random
+        //     offset for positioning the line of entry cells "onto"
+        //     the randFrontier entry cell.
+        let randLength = getRandomInt(2, 9);
+        const _r = randFrontier.r;
+        const _c = randFrontier.c;
+        let startRow = 1;
+        let endRow   = this.height - 1;
+        let startCol = 1;
+        let endCol   =  this.width - 1; 
+        let proposedCoords = [];
+        if (randFrontier.requiredAxis === 'vertical') {
+            startRow = getRandomInt(
+                Math.max(_r - (randLength-1), 1),
+                Math.min(_r, this.height - randLength));
+            endRow   = startRow + (randLength - 1);
+            startCol = _c;
+            endCol   = _c;
+            // package proposed line into an array of points
+            for (let row = startRow; row <= endRow; row++) {
+                proposedCoords.push({r: row, c: _c});
+            }
+        } else {
+            // required axis is 'horizontal'
+            startCol = getRandomInt(
+                Math.max(_c - (randLength-1), 1),
+                Math.min(_c, this.width - randLength));
+            endCol   = startCol + (randLength - 1);
+            startRow = _r;
+            endRow   = _r;
+            // package proposed line into an array of points
+            for (let col = startCol; col <= endCol; col++) {
+                proposedCoords.push({r: _r, c: col});
+            }
+        }
+        // Check
+        console.log("Step 8 Complete: random line length and offset. ");
+        console.log("    randLength = " + randLength);
+        console.log("    startRow = " + startRow);
+        console.log("    endRow = " + endRow);
+        console.log("    startCol = " + startCol);
+        console.log("    endCol = " + endCol);
+        console.log("    proposedCoords: ");
+        console.table(proposedCoords);
+
+        // (9)
+        const _valid = this.isValidRunPlacement(proposedCoords);
+        // Check
+        console.log("Step 9 Complete: isValidRunPlacement() returned " + _valid)
+
+
 
         // (6) A "tree-growing" loop to grow our collection of entry
         //     cells while keeping the collection connected.
@@ -311,9 +457,7 @@ class KakuroGenerator {
             }
         }
 
-        // Check:
-        console.log("Step 1 Complete: Data grid initialized to "
-                    + "solid blank blocks.");
+        
         console.log("Step 2 Complete: Symmetrical bounds calculated.");
         console.log("Step 3 Complete: Symmetrical 'entry' tracks carved "
                     + "into memory.");
@@ -333,6 +477,118 @@ class KakuroGenerator {
             }
             console.log(rowStr);
         }
+    }
+
+    getOpenFrontiers() {
+        // Find and return a list of all entry cells that have either
+        // blank upper and lower neighbors or blank left and right
+        // neighbors. Notice that an entry cell should never have both
+        // such conditions.
+        const frontiers = [];
+        for (let r = 1; r < this.height; r++) {
+            for (let c = 1; c < this.width; c++) {
+
+                if (this.grid[r][c].type === 'entry') {
+
+                    // Evaluate vertical neighbors / boundaries
+                    const topBlank    = this.grid[r-1][c].type === 'blank';
+                    // If we are on bottom row, there is no cell below,
+                    // which acts like a blank boundary/wall.
+                    const bottomBlank = (r === this.height - 1) ?
+                        true : (this.grid[r+1][c].type === 'blank');
+
+                    // Evaluate horizontal neighbors / boundaries
+                    const leftBlank   = this.grid[r][c-1].type === 'blank';
+                    // If we are on far rigth column, there is no cell
+                    // to the right, which acts like a blank.
+                    const rightBlank  = (c === this.width - 1) ?
+                        true : (this.grid[r][c+1].type === 'blank');
+
+                    // Case 1: Isolated vertically (needs vert growth)
+                    if (topBlank && bottomBlank) {
+                        frontiers.push({ r: r, c: c, requiredAxis: 'vertical'});
+                    }
+
+                    // Case 2: Isolated horizontally (needs horiz growth)
+                    if (leftBlank && rightBlank) {
+                        frontiers.push({ r: r, c: c, requiredAxis: 'horizontal'});
+                    }
+                }
+            }
+        }
+
+        return frontiers;
+    }
+
+    isValidRunPlacement(coords) {
+        // Check if coords are consistent with a valid run placement
+
+        // Check for boundary violation
+        const _startRow = coords[0].r;
+        const _endRow   = coords[coords.length - 1].r;
+        const _startCol = coords[0].c;
+        const _endCol = coords[coords.length - 1].c;
+        if (_startRow < 1 || _endRow > this.height - 1
+            || _startCol < 1 || _endCol > this.width - 1) {
+            return false;
+        }
+
+        const _direction = 
+            (_startRow === _endRow) ? 'horizontal' : 'vertical';
+        let _runLength = coords.length;
+        
+        // Check for fusion with other runs
+        if (_direction === 'vertical') {
+            let _currentRow = _startRow - 1;
+            let _currentCellIsEntry =
+                _currentRow <= 0? false :
+                    this.grid[_currentRow][_startCol].type === 'entry';
+            while (_currentCellIsEntry) {
+                _runLength += 1;
+                _currentRow -= 1;
+                _currentCellIsEntry =
+                    this.grid[_currentRow][_startCol].type === 'entry';
+
+            }
+            _currentRow = _endRow + 1;
+            _currentCellIsEntry =
+                _currentRow >= this.height? false :
+                    this.grid[_currentRow][_startCol].type === 'entry';
+            while (_currentCellIsEntry) {
+                _runLength += 1;
+                _currentRow += 1;
+                _currentCellIsEntry =
+                    _currentRow >= this.height? false :
+                        this.grid[_currentRow][_startCol].type === 'entry';
+            }
+
+        } else {
+            let _currentCol = _startCol - 1;
+            let _currentCellEntry = 
+                _currentCol <= 0? false :
+                    this.grid[_startRow][_currentCol].type === 'entry';
+            while (_currentCellEntry) {
+                _runLength += 1;
+                _currentCol -= 1;
+                _currentCellEntry = 
+                    this.grid[_startRow][_currentCol].type === 'entry';
+            }
+            _currentCol = _endCol + 1;
+            _currentCellEntry = 
+                _currentCol >= this.width? false :
+                    this.grid[_startRow][_currentCol].type === 'entry';
+            while (_currentCellEntry) {
+                _runLength += 1;
+                _currentCol += 1;
+                _currentCellEntry = 
+                    _currentCol >= this.width? false : 
+                        this.grid[_startRow][_currentCol].type === 'entry';
+            }
+        }
+
+        if (_runLength > 9) return false;
+
+        return true;
     }
 
     getFrontierPairs(row, col, activeFrontierPairs) {
