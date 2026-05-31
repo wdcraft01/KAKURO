@@ -289,21 +289,34 @@ class KakuroGenerator {
             if (step < halfHeight) {
                 const runs = this.getLineSegments(step, 'horizontal');
                 for (let run of runs) {
+
+                    let splitIdx;
+
                     if (run.length > 9) {
-                        // Determine appropriate split location
-                        const minSplitIdx = run.start + 2;
-                        const maxSplitIdx = run.end - 2;
-                        // Further tighten bounds to guarantee neither
-                        // subseg exceeds length 9 (IF possible)
-                        const strictMin = Math.max(minSplitIdx, run.end - 9);
-                        const stringMax = Math.min(maxSplitIdx, run.start + 9);
-                        // Pick a randomindex in [strictMin, strictMax]
-                        const splitIdx = getRandomInt(strictMin, strictMax);
+
+                        if (run.length > 11) {
+                            // Long length exception: slice off legal chunk
+                            if (Math.random() < 0.5) {
+                                splitIdx = run.start + 9; // leave length-9 run on left
+                            } else {
+                                splitIdx = run.edn - 9; // leave length-9 run on right
+                            }
+                        } else {
+                            // standard over-long run of length 10 or 11
+                            // Determine appropriate split location
+                            const minSplitIdx = run.start + 2;
+                            const maxSplitIdx = run.end - 2;
+                            // Further tighten bounds to guarantee neither
+                            // subseg exceeds length 9 (IF possible)
+                            const strictMin = Math.max(minSplitIdx, run.end - 9);
+                            const strictMax = Math.min(maxSplitIdx, run.start + 9);
+                            // Pick a randomindex in [strictMin, strictMax]
+                            const splitIdx = getRandomInt(strictMin, strictMax);
+                        }
                         this.grid[step][splitIdx].type = 'blank';
                         const symCoords =
                             this.getSymmetricCoords(step, splitIdx);
                         this.grid[symCoords.r][symCoords.c].type = 'blank';
-
                     }
                 }
             }
@@ -313,20 +326,29 @@ class KakuroGenerator {
                 const runs = this.getLineSegments(step, 'vertical');
                 for (let run of runs) {
                     if (run.length > 9) {
-                        // Determine appropriate split location
-                        const minSplitIdx = run.start + 2;
-                        const maxSplitIdx = run.end - 2;
-                        // Further tighten bounds to guarantee neither
-                        // subseg exceeds length 9 (IF possible)
-                        const strictMin = Math.max(minSplitIdx, run.end - 9);
-                        const stringMax = Math.min(maxSplitIdx, run.start + 9);
-                        // Pick a randomindex in [strictMin, strictMax]
-                        const splitIdx = getRandomInt(strictMin, strictMax);
+                        if (run.length > 11) {
+                            // Long length exception: slice off legal chunk
+                            if (Math.random() < 0.5) {
+                                splitIdx = run.start + 9; // leave length-9 run on left
+                            } else {
+                                splitIdx = run.edn - 9; // leave length-9 run on right
+                            }
+                        } else {
+                            // standard over-long run of length 10 or 11
+                            // Determine appropriate split location
+                            const minSplitIdx = run.start + 2;
+                            const maxSplitIdx = run.end - 2;
+                            // Further tighten bounds to guarantee neither
+                            // subseg exceeds length 9 (IF possible)
+                            const strictMin = Math.max(minSplitIdx, run.end - 9);
+                            const stringMax = Math.min(maxSplitIdx, run.start + 9);
+                            // Pick a randomindex in [strictMin, strictMax]
+                            const splitIdx = getRandomInt(strictMin, strictMax);
+                        }
                         this.grid[splitIdx][step].type = 'blank';
                         const symCoords =
                             this.getSymmetricCoords(splitIdx, step);
                         this.grid[symCoords.r][symCoords.c].type = 'blank';
-
                     }
                 }
             }
