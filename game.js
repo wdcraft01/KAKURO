@@ -178,7 +178,13 @@ class KakuroGenerator {
         const randFrontier = frontiers[randFrontierIndex];
         
         // Loop through random lengths (2-9) and random offsets:
-        const randLengths = shuffle([2,3,4,5,6,7,8,9]);
+        let lengthOptions = [2, 3, 4, 5, 6, 7, 8, 9];
+        if (currentDensity >= this.density) {
+            // We are over density, so only allow small extensions
+            // to close open gaps
+            lengthOptions = [2, 3]
+        }
+        const randLengths = shuffle(lengthOptions);
         for (const len of randLengths) {
             const _r = randFrontier.r;
             const _c = randFrontier.c;
