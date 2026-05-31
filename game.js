@@ -37,6 +37,7 @@ class KakuroGenerator {
     constructor(width, height) {
         this.width = width;
         this.height = height;
+        this.density = 0.45;
         // Generate matrix of cell objects
         this.grid = this.createEmptyLayout(); 
     }
@@ -67,6 +68,238 @@ class KakuroGenerator {
             // mathematically impossible
             return this.generatePuzzle();
         }
+    }
+
+    carveBoardLayout() {
+        // Construct the layout for the puzzle, using general height
+        // and width specifications, a tree-growing approach to
+        // developing the entry cells, and maintaining 180-deg
+        // rotational symmetry for the playable inner core.
+
+        // (1) Clear all values and initialize the matrix to
+        //     solid blocks.
+        for (let r = 0; r < this.height; r++) {
+            for (let c = 0; c < this.width; c++) {
+
+                this.grid[r][c].type = 'blank';
+                this.grid[r][c].correctValue = null;
+                this.grid[r][c].rowClue = null
+                this.grid[r][c].colClue = null
+            }
+        }
+        // Check:
+        console.log("Step (1) Complete: Data grid initialized to "
+                    + "solid blank blocks.");
+
+        // (2) Choose an initial seed location, intended as the
+        //     upper-left corner of an initial 2 x 2 block of entry
+        //     cells
+        const seed = this.initialSeedLocation();
+        // Check:
+        console.log("Step (2) Complete: Initial seed location selected, "
+                    + "with seed:" + JSON.stringify(seed, null));
+
+        // (3) Define the 2-4 coordinates making up the initial 
+        // 2-4 linear block
+        const horizontalVertical = getRandomInt(0, 1);
+        const initLength = getRandomInt(2, 4);
+        const coordsToCarve = []
+        if (horizontalVertical === 0) {
+            // create an initial horizontal linear block
+            for (let dc = 0; dc < initLength; dc++) {
+                coordsToCarve.push({r: seed.row, c: seed.col + dc})
+            } 
+        } else {
+            // create an initial vertical linear block
+            for (let dr = 0; dr < initLength; dr++) {
+                coordsToCarve.push({r: seed.row + dr, c: seed.col})
+            }
+        }
+        // Check:
+        console.log("Step (3) Complete: Linear block seed established, "
+                    + "with coordsToCarve: ");
+        console.table(coordsToCarve);
+
+        // (4) Carve the seed entry cells, along with their symmetrical
+        //     collection
+        coordsToCarve.forEach(coord => {
+            this.grid[coord.r][coord.c].type = 'entry';
+            const mirrored = this.getSymmetricCoords(coord.r, coord.c);
+            this.grid[mirrored.r][mirrored.c].type = 'entry';
+        })
+        // Check:
+        console.log("Step (4) Complete: Carved out seed entry cells and "
+                    + "mirrored collection.");
+        console.log("Textual preview of the grid thus far: ");
+        this.printPuzzleLayout();
+
+        // (5) Recursively carve remainder of board
+        const totalSuccess = this.recursiveGrow();
+
+        if (!totalSuccess) {
+            console.error("Failed to generate a valid board layout "
+                          + "within constraints.");
+            // Handle catastrophic failure and/or restart the seed
+        }
+
+        console.log("Step (5) Complete: Layout carved successfully.");
+
+        console.log("Textual preview of the grid thus far: ");
+        this.printPuzzleLayout();
+
+    } // END carveBoardLayout()
+
+    recursiveGrow() {
+        // Grow the collection of 'entry' cells.
+
+        // Calculate current density
+        const currentDensity = this.calculateCurrentDensity();
+        console.log("    recursiveGrow(): currentDensity = "
+                    + currentDensity.toFixed(3));
+
+        // Get current frontiers
+        const frontiers = this.getOpenFrontiers();
+        console.log("    recursiveGrow(): obtained the frontier cells "
+                    + "(" + frontiers.length + ")");
+        // console.table(frontiers);
+
+        if (currentDensity >= this.density && frontiers.length === 0) {
+            // Board layout is completely full and legal.
+            return true
+        }
+
+        if (frontiers.length === 0 && currentDensity < this.density) {
+            // Board layout is "trapped"; we must roll back.
+            return false;
+        }
+
+        // Pick random frontier element
+        const randFrontierIndex = getRandomInt(0, frontiers.length - 1);
+        const randFrontier = frontiers[randFrontierIndex];
+        
+        // Loop through random lengths (2-9) and random offsets:
+        const randLengths = shuffle([2,3,4,5,6,7,8,9]);
+        for (const len of randLengths) {
+            const _r = randFrontier.r;
+            const _c = randFrontier.c;
+            let startRow  = 1;
+            let endRow    = this.height - 1;
+            let startCol  = 1;
+            let endCol    =  this.width - 1;
+            let possibleRowStarts = [];
+            let possibleColStarts = [];
+            let proposedCoords = [];
+            if (randFrontier.requiredAxis === 'vertical') {
+                const minStartRow = Math.max(_r - (len - 1), 1);
+                const maxStartRow = Math.min(_r, this.height - len);
+                possibleRowStarts = Array.from(
+                    { length: len},
+                    (_, index) => minStartRow + index);
+                possibleRowStarts = shuffle(possibleRowStarts);
+                startCol = _c;
+                endCol   = _c;
+                for (const startRow of possibleRowStarts) {
+                    // package proposed line into an array of points
+                    proposedCoords = [];
+                    for (let row = startRow; row <= startRow + len - 1; row++) {
+                        proposedCoords.push({r: row, c: _c});
+                    }
+
+                    if (this.isValidRunPlacement(proposedCoords)) {
+                        const changedCells = []; // for back-tracking
+                        // Commit the coords as 'entry' cells.
+                        proposedCoords.forEach(coord => {
+                            if (this.grid[coord.r][coord.c].type === 'blank') {
+                                this.grid[coord.r][coord.c].type = 'entry';
+                                changedCells.push({r: coord.r, c: coord.c});
+                                const mirrored = this.getSymmetricCoords(
+                                    coord.r, coord.c);
+                                this.grid[mirrored.r][mirrored.c].type = 'entry';
+                                changedCells.push({r: mirrored.r, c: mirrored.c});
+                            }
+                        })
+                        // Recurse.
+                        const success = this.recursiveGrow();
+                        if (success) {
+                            return true;
+                        }
+
+                        // Rollback Phase (block above was not a success)
+                        changedCells.forEach(coord => {
+                            this.grid[coord.r][coord.c].type = 'blank';
+                        })
+                    }
+                }
+                
+            } else {
+                // requiredAxis === 'horizontal'
+                const minStartCol = Math.max(_c - (len - 1), 1);
+                const maxStartCol = Math.min(_c, this.width - len);
+                possibleColStarts = Array.from(
+                    { length: len},
+                    (_, index) => minStartCol + index);
+                possibleColStarts = shuffle(possibleColStarts);
+                startRow = _r;
+                endRow   = _r;
+                for (const startCol of possibleColStarts) {
+                    // package proposed line into an array of points
+                    proposedCoords = [];
+                    for (let col = startCol; col <= startCol + len - 1; col++) {
+                        proposedCoords.push({r: _r, c: col});
+                    }
+
+                    if (this.isValidRunPlacement(proposedCoords)) {
+                        const changedCells = []; // for back-tracking
+                        // Commit the coords as 'entry' cells.
+                        proposedCoords.forEach(coord => {
+                            if (this.grid[coord.r][coord.c].type === 'blank') {
+                                this.grid[coord.r][coord.c].type = 'entry';
+                                changedCells.push({r: coord.r, c: coord.c});
+                                const mirrored = this.getSymmetricCoords(
+                                    coord.r, coord.c);
+                                this.grid[mirrored.r][mirrored.c].type = 'entry';
+                                changedCells.push({r: mirrored.r, c: mirrored.c});
+                            }
+                        })
+                        // Recurse.
+                        const success = this.recursiveGrow();
+                        if (success) {
+                            return true;
+                        }
+
+                        // Rollback Phase (block above was not a success)
+                        changedCells.forEach(coord => {
+                            this.grid[coord.r][coord.c].type = 'blank';
+                        })
+                    }
+                }
+                
+            }
+
+        } // end len loop
+
+        // If we tried everything and nothing worked, return false
+        // to trigger a back-track step above
+        return false;
+    }
+
+    calculateCurrentDensity() {
+        // Calculate and return the current density of 'entry' cells,
+        // i.e., E/T, where E is the number of 'entry' cells and T is
+        // the total number of cells in the playable region (the
+        // entire region except the first column and first row).
+
+        let entryCount = 0;
+        const totalPlayableCellCount = (this.height - 1) * (this.width - 1);
+
+        for (let r = 1; r < this.height; r++) {
+            for (let c = 1; c < this.width; c++) {
+                if (this.grid[r][c].type === 'entry') {
+                    entryCount++;
+                }
+            }
+        }
+        return entryCount / totalPlayableCellCount;
     }
 
     initialSeedLocation() {
@@ -176,309 +409,6 @@ class KakuroGenerator {
 
     }
 
-    getIntersectionCandidates() {
-    }
-
-    carveBoardLayout() {
-        // Construct the layout for the puzzle, using general height
-        // and width specifications, a tree-growing approach to
-        // developing the entry cells, and maintaining 180-deg
-        // rotational symmetry for the playable inner core.
-
-        // (1) Clear all values and initialize the matrix to
-        //     solid blocks.
-        for (let r = 0; r < this.height; r++) {
-            for (let c = 0; c < this.width; c++) {
-
-                this.grid[r][c].type = 'blank';
-                this.grid[r][c].correctValue = null;
-                this.grid[r][c].rowClue = null
-                this.grid[r][c].colClue = null
-            }
-        }
-        // Check:
-        console.log("Step 1 Complete: Data grid initialized to "
-                    + "solid blank blocks.");
-
-        // (2) Choose an initial seed location, intended as the
-        //     upper-left corner of an initial 2 x 2 block of entry
-        //     cells
-        const seed = this.initialSeedLocation();
-        // Check:
-        console.log("Step 2 Complete: Initial seed location selected, "
-                    + "with seed:" + JSON.stringify(seed, null));
-
-        // (3) Define the 2-4 coordinates making up the initial 
-        // 2-4 linear block
-        const horizontalVertical = getRandomInt(0, 1);
-        const initLength = getRandomInt(2, 4);
-        const coordsToCarve = []
-        if (horizontalVertical === 0) {
-            // create an initial horizontal linear block
-            for (let dc = 0; dc < initLength; dc++) {
-                coordsToCarve.push({r: seed.row, c: seed.col + dc})
-            } 
-        } else {
-            // create an initial vertical linear block
-            for (let dr = 0; dr < initLength; dr++) {
-                coordsToCarve.push({r: seed.row + dr, c: seed.col})
-            }
-        }
-        // Check:
-        console.log("Step 3 Complete: Linear block seed established, "
-                    + "with coordsToCarve: ");
-        console.table(coordsToCarve);
-
-        // (4) Carve the seed entry cells, along with their symmetrical
-        //     collection
-        coordsToCarve.forEach(coord => {
-            this.grid[coord.r][coord.c].type = 'entry';
-            const mirrored = this.getSymmetricCoords(coord.r, coord.c);
-            this.grid[mirrored.r][mirrored.c].type = 'entry';
-        })
-        // Check:
-        console.log("Step 4 Complete: Carved out seed entry cells and "
-                    + "mirrored collection.");
-        
-        // (5) Obtain the initial frontier cells
-        const frontiers = this.getOpenFrontiers();
-        // Check:
-        console.log("Step 5 Complete: obtained the initial frontier cells:");
-        console.table(frontiers);
-        
-        // (6) Establish a density factor to use in randomly setting
-        //     cells to be 'entry' cells or not (higher = more entry
-        //     spaces).
-        const densityFactor = 0.45;
-        console.log("Step 6 Complete: estab'd density factor of "
-                    + densityFactor);
-        
-        // (7) Pick random frontier element
-        const randFrontierIndex = getRandomInt(0, frontiers.length - 1);
-        const randFrontier = frontiers[randFrontierIndex];
-        console.log("Step 7 Complete: random frontier element chosen, "
-                    + "with randFrontier being " + JSON.stringify(randFrontier));
-        
-        // (8) Pick random line span and random offset
-        //     These are not independent of each other, so we pick
-        //     a random line length 2 <= l <= 9, then based on the
-        //     position of the randFrontier element, we pick a random
-        //     offset for positioning the line of entry cells "onto"
-        //     the randFrontier entry cell.
-        let randLength = getRandomInt(2, 9);
-        const _r = randFrontier.r;
-        const _c = randFrontier.c;
-        let startRow = 1;
-        let endRow   = this.height - 1;
-        let startCol = 1;
-        let endCol   =  this.width - 1; 
-        let proposedCoords = [];
-        if (randFrontier.requiredAxis === 'vertical') {
-            startRow = getRandomInt(
-                Math.max(_r - (randLength-1), 1),
-                Math.min(_r, this.height - randLength));
-            endRow   = startRow + (randLength - 1);
-            startCol = _c;
-            endCol   = _c;
-            // package proposed line into an array of points
-            for (let row = startRow; row <= endRow; row++) {
-                proposedCoords.push({r: row, c: _c});
-            }
-        } else {
-            // required axis is 'horizontal'
-            startCol = getRandomInt(
-                Math.max(_c - (randLength-1), 1),
-                Math.min(_c, this.width - randLength));
-            endCol   = startCol + (randLength - 1);
-            startRow = _r;
-            endRow   = _r;
-            // package proposed line into an array of points
-            for (let col = startCol; col <= endCol; col++) {
-                proposedCoords.push({r: _r, c: col});
-            }
-        }
-        // Check
-        console.log("Step 8 Complete: random line length and offset. ");
-        console.log("    randLength = " + randLength);
-        console.log("    startRow = " + startRow);
-        console.log("    endRow = " + endRow);
-        console.log("    startCol = " + startCol);
-        console.log("    endCol = " + endCol);
-        console.log("    proposedCoords: ");
-        console.table(proposedCoords);
-
-        // (9)
-        const _valid = this.isValidRunPlacement(proposedCoords);
-        // Check
-        console.log("Step 9 Complete: isValidRunPlacement() returned " + _valid)
-
-
-
-        // (6) A "tree-growing" loop to grow our collection of entry
-        //     cells while keeping the collection connected.
-
-        let currentEntryCount = 2;
-        const maxEntries = Math.floor((this.width * this.height) * 0.45);
-
-        while (frontier.length > 0 && currentEntryCount < maxEntries) {
-
-            const randIndex = getRandomInt(0, frontier.length-1)
-            const [chosenPair] = frontier.splice(randIndex, 1);
-            let r1 = chosenPair[0][0];
-            let c1 = chosenPair[0][1];
-            let r2 = chosenPair[1][0];
-            let c2 = chosenPair[1][1];
-
-            // Lazy cleanup: If previous mirror pass already claimed
-            // either cell in the pair, we simply ignore it and move
-            // to next loop iteration
-            if (this.grid[r1][c1].type !== 'blank'
-                || this.grid[r2][c2].type !== 'blank') {
-                continue;
-            }
-            
-            if (Math.random() < densityFactor) {
-                const mirrorR1 = maxPlayableRow - (r1 - minPlayableRow);
-                const mirrorC1 = maxPlayableCol - (c1 - minPlayableCol);
-                const mirrorR2 = maxPlayableRow - (r2 - minPlayableRow);
-                const mirrorC2 = maxPlayableCol - (c2 - minPlayableCol);
-
-                // Mutate primary pair of cells.
-                this.grid[r1][c1].type = 'entry';
-                this.grid[r2][c2].type = 'entry';
-                currentEntryCount += 2;
-
-                // Immediately update set of frontier pairs
-                frontier.push(...this.getFrontierPairs(r1, c1, frontier));
-                frontier.push(...this.getFrontierPairs(r2, c2, frontier));
-
-                // Handle normal cell vs. center tile of odd-sized board
-                if (r1 !== mirrorR1 || c1 !== mirrorC1) {
-                    // we are not dealing with center cell of board
-                    this.grid[mirrorR1][mirrorC1].type = 'entry';
-                    currentEntryCount += 1;
-                    frontier.push(...this.getFrontierPairs(
-                        mirrorR1, mirrorC1, frontier));
-                }
-                if (r2 !== mirrorR2 || c2 !== mirrorC2) {
-                    // we are not dealing with center cell of board
-                    this.grid[mirrorR2][mirrorC2].type = 'entry';
-                    currentEntryCount += 1;
-                    frontier.push(...this.getFrontierPairs(
-                        mirrorR2, mirrorC2, frontier));
-                }
-            }
-            
-        } // end tree-growing while() loop
-
-        // (7) Surgical edge-shaving: trim any remaining unplayable
-        //     1-cell stubs to ensure every single playable entry has
-        //     at least a 2-cell runway in both directions
-
-        for (let r = minPlayableRow; r <= maxPlayableRow; r++) {
-            for (let c = minPlayableCol; c <= maxPlayableCol; c++) {
-
-                if (this.grid[r][c].type === 'entry') {
-
-                    // Count length of horizontal seq passing thru here
-                    let leftC  = c;
-                    let rightC = c;
-                    while (leftC >= minPlayableCol
-                        && this.grid[r][leftC].type === 'entry') {
-                        leftC--;
-                    }
-                    while (rightC <= maxPlayableCol
-                        && this.grid[r][rightC].type === 'entry') {
-                        rightC++;
-                    }
-                    const hRunLength = rightC - leftC - 1;
-
-                    // Count length of vertical seq passing thru here
-                    let upR  = r;
-                    let downR = r;
-                    while (upR >= minPlayableRow
-                        && this.grid[upR][c].type === 'entry') {
-                        upR--;
-                    }
-                    while (downR <= maxPlayableRow
-                        && this.grid[downR][c].type === 'entry') {
-                        downR++;
-                    }
-                    const vRunLength = downR - upR - 1;
-
-                    // run-length violation check
-                    const isTooShort = (hRunLength === 1 || vRunLength === 1);
-                    // const isTooLong  = (hRunLength > 9 || vRunLength > 9);
-
-                    if (isTooShort) {
-                        this.grid[r][c].type = 'blank';
-                        // Find mirrored position
-                        const mirroredR = maxPlayableRow - (r - minPlayableRow);
-                        const mirroredC = maxPlayableCol - (c - minPlayableCol);
-                        this.grid[mirroredR][mirroredC].type = 'blank';
-
-                        // signal that we have changed the board
-                        // boardChanged = true;
-                    }
-                }
-            }
-        }
-        // } // end while(boardChanged) loop
-
-        // (8) Identify Clue Block locations and mutate blank blocks
-        //     to clue blocks
-        for (let r = 0; r < this.height; r++) {
-            for (let c = 0; c < this.width; c++) {
-
-                // Only concerned with non-entry cells
-                if (this.grid[r][c].type === 'blank') {
-
-                    // Check A: 2 playable 'entry' cells directly to right?
-                    const hasHorizontalRun = (
-                        c + 2 < this.width
-                        && this.grid[r][c+1].type === 'entry'
-                        && this.grid[r][c+2].type === 'entry'
-                    );
-
-                    // Check B: playable 'entry' cell directly below?
-                    const hasVerticalRun = (
-                        r + 2 < this.height 
-                        && this.grid[r+1][c].type === 'entry'
-                        && this.grid[r+2][c].type === 'entry');
-                    
-                    if (hasHorizontalRun || hasVerticalRun) {
-                        this.grid[r][c].type = 'clue';
-                        // Set clues to 0 instead of null to facilate later
-                        // updates
-                        if (hasHorizontalRun) this.grid[r][c].rowClue = 0;
-                        if (hasVerticalRun)   this.grid[r][c].colClue = 0;
-                    }
-                }
-            }
-        }
-
-        
-        console.log("Step 2 Complete: Symmetrical bounds calculated.");
-        console.log("Step 3 Complete: Symmetrical 'entry' tracks carved "
-                    + "into memory.");
-        console.log("Step 4 Complete: Isolated 'entry' cells converted "
-                    + "to solid blank blocks.");
-        console.log("Textual preview of the grid thus far: ")
-        for (let r = 0; r < this.height; r++) {
-            let rowStr = "";
-            for (let c = 0; c < this.width; c++) {
-                if (this.grid[r][c].type === 'entry') {
-                    rowStr += "0 ";
-                } else if (this.grid[r][c].type === 'clue') {
-                    rowStr += "C "
-                } else {
-                    rowStr += "1 ";
-                }
-            }
-            console.log(rowStr);
-        }
-    }
-
     getOpenFrontiers() {
         // Find and return a list of all entry cells that have either
         // blank upper and lower neighbors or blank left and right
@@ -536,7 +466,7 @@ class KakuroGenerator {
         const _direction = 
             (_startRow === _endRow) ? 'horizontal' : 'vertical';
         let _runLength = coords.length;
-        
+
         // Check for fusion with other runs
         if (_direction === 'vertical') {
             let _currentRow = _startRow - 1;
@@ -591,85 +521,21 @@ class KakuroGenerator {
         return true;
     }
 
-    getFrontierPairs(row, col, activeFrontierPairs) {
-        // Find non-entry adjacent pairs of cell locations, one
-        // of which is adjacent to the (row, col) cell, and
-        // add the pair to the activeFrontierPairs list if not
-        // already present in the list.
-
-        const possiblePairs = [
-            [[row, col-2],[row, col-1]],  // left
-            [[row, col+1],[row, col+2]],  // right
-            [[row-1, col],[row-2, col]],  // up
-            [[row+1, col],[row+2, col]],  // down
-            [[row, col+1],[row+1,col+1]], // right-down
-            [[row, col+1],[row-1,col+1]], // right-up
-            [[row-1, col],[row-1,col+1]], // up-right
-            [[row-1, col],[row-1,col-1]], // up-left
-            [[row, col-1],[row-1,col-1]], // left-up
-            [[row, col-1],[row+1,col-1]], // left-down
-            [[row+1, col],[row+1,col-1]], // down-left
-            [[row+1, col],[row+1,col+1]] // down-right
-        ]
-
-        const actualPairs = [];
-
-        for (let pair of possiblePairs) {
-            let r1 = pair[0][0];
-            let c1 = pair[0][1];
-            let r2 = pair[1][0];
-            let c2 = pair[1][1];
-            if (   r1 > 0 && r1 <= this.height-1
-                && c1 > 0 && c1 <= this.width-1
-                && r2 > 0 && r2 <= this.height-1
-                && c2 > 0 && c2 <= this.width-1 ) {
-                
-                if (this.grid[r1][c1].type === 'blank'
-                    && this.grid[r2][c2].type === 'blank') {
-
-                        // we can't compare the entire object in JS
-                        // so we have to look at the pieces :(
-                        const isDuplicate = activeFrontierPairs.some(
-                            activePair => activePair[0][0] === r1
-                                          && activePair[0][1] === c1 
-                                          && activePair[1][0] === r2
-                                          && activePair[1][1] === c2
-                        );
-                        if (!isDuplicate) {
-                            actualPairs.push(pair);
-                        }
-
-                    }
-            }
-
-        } // end for() loop
-
-        return actualPairs;
-    }
-
-    getFrontierNeighbors(row, col, activeFrontier) {
-        // Find non-entry ("frontier") neighbors abutting the cell
-        // at location (row, col), and add those locations to the
-        // activeFrontier list if not already in the list.
-
-        const shifts = [[-1,0], [1,0], [0,-1], [0,1]];
-        const neighbors = [];
-
-        for (let shift of shifts) {
-            let r = row + shift[0];
-            let c = col + shift[1];
-            if (r > 0 && r <= this.height-1 && c > 0 && c <= this.width-1) {
-                if (this.grid[r][c].type === 'blank') {
-                    const isDuplicate = activeFrontier.some(
-                        coord => coord[0] === r && coord[1] === c
-                    );
-                    if (!isDuplicate) {
-                        neighbors.push([r, c]);
-                    }
+    printPuzzleLayout() {
+        // print a text version of the puzzle layout
+        for (let r = 0; r < this.height; r++) {
+            let rowStr = "";
+            for (let c = 0; c < this.width; c++) {
+                if (this.grid[r][c].type === 'entry') {
+                    rowStr += "0 ";
+                } else if (this.grid[r][c].type === 'clue') {
+                    rowStr += "C "
+                } else {
+                    rowStr += "1 ";
                 }
             }
+            console.log(rowStr);
         }
-        return neighbors;
     }
     
     calculateSumsFromSolution() {
