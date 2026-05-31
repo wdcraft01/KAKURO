@@ -54,20 +54,395 @@ class KakuroGenerator {
         return matrix;
     }
 
-    // High-level generation controller
-    generatePuzzle() {
-        // Generate entry vs non-entry cell locations
-        this.carveBoardLayout();
+    // Original high-level generation controller
+    // generatePuzzle() {
+    //     // Generate entry vs non-entry cell locations
+    //     this.carveBoardLayout();
 
-        if (this.fillEntryCells(0,0)) {
-            this.calculateSumsFromSolution();
-            this.clearEntryCellsForPlay();
-            return this.grid;
-        } else {
-            // Fail-safe: Retry if layout config was
-            // mathematically impossible
-            return this.generatePuzzle();
+    //     if (this.fillEntryCells(0,0)) {
+    //         this.calculateSumsFromSolution();
+    //         this.clearEntryCellsForPlay();
+    //         return this.grid;
+    //     } else {
+    //         // Fail-safe: Retry if layout config was
+    //         // mathematically impossible
+    //         return this.generatePuzzle();
+    //     }
+    // }
+
+    // New, CA-based high-level generation controller
+    generatePuzzle() {
+
+        // Generate random initial board
+        this.randomlyPopulate();
+
+        // Filters
+        this.removeLengthOneHorizontalRuns();
+        this.removeLengthOneVerticalRuns();
+        this.splitLongRuns();
+
+        // if (this.fillEntryCells(0,0)) {
+        //     this.calculateSumsFromSolution();
+        //     this.clearEntryCellsForPlay();
+        //     return this.grid;
+        // } else {
+        //     // Fail-safe: Retry if layout config was
+        //     // mathematically impossible
+        //     return this.generatePuzzle();
+        // }
+    }
+
+    randomlyPopulate() {
+        // Randomly populate the playable area with 50% 'entry' and
+        // 50% 'blank' cells, maintaining 180° rotational symmetry.
+
+        // Determine vertical midpoint, for the boundary for the
+        // top-half loop
+        const halfHeight = Math.ceil(this.height / 2);
+
+        for (let r = 1; r < halfHeight; r++) {
+            for (let c = 1; c < this.width; c++) {
+
+                const chosenType = (Math.random() < 0.5)? 'blank' : 'entry';
+                this.grid[r][c].type = chosenType;
+                const symCoords = this.getSymmetricCoords(r, c);
+                this.grid[symCoords.r][symCoords.c].type = chosenType;
+
+            }
         }
+
+        // Handle special case: if number of playable rows is odd,
+        // handle middle row separately up to its horizontal midpt
+        if ((this.height - 1) % 2 !== 0) {
+            // We have a middle row, which is its own mirror
+            const midRow = Math.floor(this.height / 2);
+            const halfWidth = Math.ceil(this.width / 2);
+            // Scan only left half of this middle row
+            for (let c = 1; c < halfWidth; c++) {
+                const chosenType = (Math.random() < 0.5)? 'blank' : 'entry';
+                this.grid[midRow][c].type = chosenType;
+                const symCoords = this.getSymmetricCoords(midRow, c);
+                this.grid[symCoords.r][symCoords.c].type = chosenType;
+            }
+
+            // If this.width - 1 is also odd, we have a middle cell
+            // being its own mirror without a mirror twin
+            if ((this.width - 1) % 2 !== 0) {
+                const midCol = Math.floor(this.width / 2);
+                this.grid[midRow][midCol].type =
+                    (Math.random() < 0.5) ? 'blank' : 'entry';
+            }
+        }
+    }
+
+    removeLengthOneHorizontalRuns() {
+        /** 
+         * Scan all playable rows, looking for and removing length-1
+         * horizontal runs of the form 'blank' 'entry' 'blank' by
+         * converting them to 'blank' 'blank' 'blank'.
+         * Because of the symmetry, we need only scan half the grid.
+        */
+
+        const halfHeight = Math.ceil(this.height / 2);
+
+        for (let r = 1; r < halfHeight; r++) {
+            for (let c = 1; c < this.width; c++) {
+                if (this.grid[r][c].type === 'entry') {
+
+                    const leftBlank = (c - 1 === 0)?
+                        true : (this.grid[r][c - 1].type === 'blank');
+                    const rightBlank = (c + 1 === this.width) ?
+                        true : (this.grid[r][c + 1].type === 'blank');
+                    
+                    if (leftBlank && rightBlank) {
+                        // we have a length-1 horizontal run, so remove it
+                        this.grid[r][c].type = 'blank';
+                        // update mirror position
+                        const symCoords = this.getSymmetricCoords(r, c);
+                        this.grid[symCoords.r][symCoords.c].type = 'blank';
+                    }
+                }
+            }
+        }
+
+        // Special case: handle middle row if playable rows are odd
+        if ((this.height - 1) % 2 !== 0) {
+            const midRow    = Math.floor(this.height / 2);
+            const halfWidth = Math.ceil(this.width / 2);
+
+            for (let c = 1; c < halfWidth; c++) {
+                if (this.grid[midRow][c].type === 'entry') {
+                    const leftBlank = (c - 1 === 0) ?
+                        true : (this.grid[midRow][c - 1].type === 'blank');
+                    const rightBlank = (c + 1 === this.width) ?
+                        true : (this.grid[midRow][c + 1].type === 'blank');
+                    if (leftBlank && rightBlank) {
+                        this.grid[midRow][c].type = 'blank';
+                        const symCoords = this.getSymmetricCoords(midRow, c);
+                        this.grid[symCoords.r][symCoords.c].type = 'blank';
+                    }
+                }
+            }
+
+            // Handle absolute center cell if playable cols also odd
+            if ((this.width - 1) % 2 !== 0) {
+                const midCol = Math.floor(this.width / 2);
+                if (this.grid[midRow][midCol].type === 'entry') {
+                    const leftBlank = (
+                        this.grid[midRow][midCol - 1].type === 'blank');
+                    const rightBlank = (
+                        this.grid[midRow][midCol + 1].type === 'blank');
+                    if (leftBlank && rightBlank) {
+                        this.grid[midRow][midCol].type = 'blank';
+                    }
+                }
+            }
+        }
+    }
+
+    removeLengthOneVerticalRuns() {
+        /** 
+         * Scan all playable columns, looking for and removing length-1
+         * vertical runs of the form 'blank' 'entry' 'blank' by
+         * converting them to 'blank' 'blank' 'blank'.
+         * Because of the symmetry, we need only scan half the grid.
+        */
+
+        const halfWidth = Math.ceil(this.width / 2);
+
+        for (let c = 1; c < halfWidth; c++) {
+            for (let r = 1; r < this.height; r++) {
+                if (this.grid[r][c].type === 'entry') {
+
+                    const topBlank = (r - 1 === 0)?
+                        true : (this.grid[r - 1][c].type === 'blank');
+                    const bottomBlank = (r + 1 === this.height) ?
+                        true : (this.grid[r + 1][c].type === 'blank');
+                    
+                    if (topBlank && bottomBlank) {
+                        // we have a length-1 vertical run, so remove it
+                        this.grid[r][c].type = 'blank';
+                        // update mirror position
+                        const symCoords = this.getSymmetricCoords(r, c);
+                        this.grid[symCoords.r][symCoords.c].type = 'blank';
+                    }
+                }
+            }
+        }
+
+        // Special case: handle middle column if playable cols are odd
+        if ((this.width - 1) % 2 !== 0) {
+            const midCol    = Math.floor(this.width / 2);
+            const halfHeight = Math.ceil(this.height / 2);
+
+            for (let r = 1; r < halfHeight; r++) {
+                if (this.grid[r][midCol].type === 'entry') {
+                    const topBlank = (r - 1 === 0) ?
+                        true : (this.grid[r-1][midCol].type === 'blank');
+                    const bottomBlank = (r + 1 === this.height) ?
+                        true : (this.grid[r + 1][midCol].type === 'blank');
+                    if (topBlank && bottomBlank) {
+                        this.grid[r][midCol].type = 'blank';
+                        const symCoords = this.getSymmetricCoords(r, midCol);
+                        this.grid[symCoords.r][symCoords.c].type = 'blank';
+                    }
+                }
+            }
+
+            // Handle absolute center cell if playable rows also odd
+            if ((this.height - 1) % 2 !== 0) {
+                const midRow = Math.floor(this.height / 2);
+                if (this.grid[midRow][midCol].type === 'entry') {
+                    const topBlank = (
+                        this.grid[midRow - 1][midCol].type === 'blank');
+                    const bottomBlank = (
+                        this.grid[midRow + 1][midCol].type === 'blank');
+                    if (topBlank && bottomBlank) {
+                        this.grid[midRow][midCol].type = 'blank';
+                    }
+                }
+            }
+        }
+    }
+
+    splitLongRuns() {
+        /**
+         * Find and split all illegally-long runs (i.e., runs of
+         * length > 9), proceeding by examining rows and columns
+         * in alternation until one or the other are exhausted then
+         * finishing up with the rest. Because of the symmetry, we
+         * only scan half the rows and half the columns.
+         * Some particularly long runs might not be completely
+         * remediated in a single pass.
+         */
+
+        // Determine loop midpts
+        const halfHeight = Math.ceil(this.height / 2);
+        const halfWidth = Math.ceil(this.width / 2);
+
+        // Determine max number steps needed to cover the half-grid
+        const maxSteps = Math.max(halfHeight, halfWidth);
+
+        for (let step = 1; step < maxSteps; step++) {
+
+            // Interleaved row scan
+            if (step < halfHeight) {
+                const runs = this.getLineSegments(step, 'horizontal');
+                for (let run of runs) {
+                    if (run.length > 9) {
+                        // Determine appropriate split location
+                        const minSplitIdx = run.start + 2;
+                        const maxSplitIdx = run.end - 2;
+                        // Further tighten bounds to guarantee neither
+                        // subseg exceeds length 9 (IF possible)
+                        const strictMin = Math.max(minSplitIdx, run.end - 9);
+                        const stringMax = Math.min(maxSplitIdx, run.start + 9);
+                        // Pick a randomindex in [strictMin, strictMax]
+                        const splitIdx = getRandomInt(strictMin, strictMax);
+                        this.grid[step][splitIdx].type = 'blank';
+                        const symCoords =
+                            this.getSymmetricCoords(step, splitIdx);
+                        this.grid[symCoords.r][symCoords.c].type = 'blank';
+
+                    }
+                }
+            }
+
+            // Interleaved column scan
+            if (step < halfWidth) {
+                const runs = this.getLineSegments(step, 'vertical');
+                for (let run of runs) {
+                    if (run.length > 9) {
+                        // Determine appropriate split location
+                        const minSplitIdx = run.start + 2;
+                        const maxSplitIdx = run.end - 2;
+                        // Further tighten bounds to guarantee neither
+                        // subseg exceeds length 9 (IF possible)
+                        const strictMin = Math.max(minSplitIdx, run.end - 9);
+                        const stringMax = Math.min(maxSplitIdx, run.start + 9);
+                        // Pick a randomindex in [strictMin, strictMax]
+                        const splitIdx = getRandomInt(strictMin, strictMax);
+                        this.grid[splitIdx][step].type = 'blank';
+                        const symCoords =
+                            this.getSymmetricCoords(splitIdx, step);
+                        this.grid[symCoords.r][symCoords.c].type = 'blank';
+
+                    }
+                }
+            }
+        }
+
+        // Special case: handle middle row if playable rows are odd
+        if ((this.height - 1) % 2 !== 0) {
+            // UNDER CONSTRUCTION
+            const midRow    = Math.floor(this.height / 2);
+            const halfWidth = Math.ceil(this.width / 2);
+            const runs = this.getLineSegments(midRow, 'horizontal');
+            for (let run of runs) {
+                if (run.length > 9) {
+                    // Determine appropriate split location
+                    const minSplitIdx = run.start + 2;
+                    const maxSplitIdx = run.end - 2;
+                    // Further tighten bounds to guarantee neither
+                    // subseg exceeds length 9 (IF possible)
+                    const strictMin = Math.max(minSplitIdx, run.end - 9);
+                    const stringMax = Math.min(maxSplitIdx, run.start + 9);
+                    // Pick a randomindex in [strictMin, strictMax]
+                    const splitIdx = getRandomInt(strictMin, strictMax);
+                    this.grid[midRow][splitIdx].type = 'blank';
+                    const symCoords =
+                        this.getSymmetricCoords(midRow, splitIdx);
+                    this.grid[symCoords.r][symCoords.c].type = 'blank';
+                    // because this is the middle row, this might produce
+                    // some oddities we need to revisit!
+
+                }
+            }
+        }
+
+        // Special case: handle middle column if playable cols are odd
+        if ((this.width - 1) % 2 !== 0) {
+            // UNDER CONSTRUCTION
+            const midCol    = Math.floor(this.width / 2);
+            const halfHeight = Math.ceil(this.height / 2);
+            const runs = this.getLineSegments(midCol, 'vertical');
+            for (let run of runs) {
+                if (run.length > 9) {
+                    // Determine appropriate split location
+                    const minSplitIdx = run.start + 2;
+                    const maxSplitIdx = run.end - 2;
+                    // Further tighten bounds to guarantee neither
+                    // subseg exceeds length 9 (IF possible)
+                    const strictMin = Math.max(minSplitIdx, run.end - 9);
+                    const stringMax = Math.min(maxSplitIdx, run.start + 9);
+                    // Pick a randomindex in [strictMin, strictMax]
+                    const splitIdx = getRandomInt(strictMin, strictMax);
+                    this.grid[splitIdx][midCol].type = 'blank';
+                    const symCoords =
+                        this.getSymmetricCoords(splitIdx, midCol);
+                    this.grid[symCoords.r][symCoords.c].type = 'blank';
+                    // because this is the middle col, this might
+                    // produce some oddities we need to revisit!
+
+                }
+            }
+        }
+
+
+    }
+
+    getLineSegments(index, axis) {
+        /**
+         * Finds all entry clusters along a row or column (axis =
+         * 'horizontal' vs. 'vertical', respectively), returning a
+         * list of such clusters. Each cluster has the form
+         * {start: m, end: n, length: l}.
+         */
+
+        const runs   = [];
+        let inRun    = false;
+        let startIdx = null;
+
+        // Determine the boundary limit based on the axis.
+        const maxLimit = (axis === 'horizontal') ? this.width : this.height;
+
+        // Collect run information
+        for (let i = 1; i < maxLimit; i++) {
+
+            // Look up cell type dynamically depending on axis
+            const cellType = (axis === 'horizontal') ?
+                this.grid[index][i].type : this.grid[i][index].type;
+            
+            if (cellType === 'entry' && !inRun) {
+                // starting a new run
+                inRun = true;
+                startIdx = i;
+
+            } else if ((cellType === 'blank') && inRun) {
+                // run has ended
+                runs.push({
+                    start: startIdx,
+                    end: i - 1,
+                    length: i - startIdx
+                });
+                inRun = false;
+
+            }
+        }
+
+        // Edge Case:
+        // If a run goes flush up against the far right or bottom
+        // edge, the loop finished without ever hitting a closing
+        // 'blank' cell.
+        if (inRun) {
+            runs.push({
+                start: startIdx,
+                end: maxLimit - 1,
+                length: maxLimit - startIdx
+            });
+        }
+
+        return runs;
     }
 
     carveBoardLayout() {
@@ -624,7 +999,7 @@ class KakuroGenerator {
 }
 
 // Choose puzzle size
-const puzzleSize = [10, 10]; // (width, height)
+const puzzleSize = [15, 20]; // (width, height)
 const activeGenerator = new KakuroGenerator(puzzleSize[0], puzzleSize[1])
 
 // Generate the puzzle
