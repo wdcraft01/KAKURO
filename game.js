@@ -476,53 +476,79 @@ class KakuroGenerator {
         // Check for fusion with other runs
         if (_direction === 'vertical') {
             let _currentRow = _startRow - 1;
-            let _currentCellIsEntry =
-                _currentRow <= 0? false :
-                    this.grid[_currentRow][_startCol].type === 'entry';
-            while (_currentCellIsEntry) {
+            while (_currentRow >= 0
+                   && this.grid[_currentRow][_startCol].type === 'entry') {
                 _runLength += 1;
                 _currentRow -= 1;
-                _currentCellIsEntry =
-                    this.grid[_currentRow][_startCol].type === 'entry';
-
             }
             _currentRow = _endRow + 1;
-            _currentCellIsEntry =
-                _currentRow >= this.height? false :
-                    this.grid[_currentRow][_startCol].type === 'entry';
-            while (_currentCellIsEntry) {
+            while (_currentRow < this.height
+                   && this.grid[_currentRow][_startCol].type === 'entry') {
                 _runLength += 1;
                 _currentRow += 1;
-                _currentCellIsEntry =
-                    _currentRow >= this.height? false :
-                        this.grid[_currentRow][_startCol].type === 'entry';
             }
 
         } else {
+            // _direction === 'horizontal'
             let _currentCol = _startCol - 1;
-            let _currentCellEntry = 
-                _currentCol <= 0? false :
-                    this.grid[_startRow][_currentCol].type === 'entry';
-            while (_currentCellEntry) {
+            while (_currentCol >= 0 &&
+                   this.grid[_startRow][_currentCol].type === 'entry') {
                 _runLength += 1;
                 _currentCol -= 1;
-                _currentCellEntry = 
-                    this.grid[_startRow][_currentCol].type === 'entry';
             }
             _currentCol = _endCol + 1;
-            _currentCellEntry = 
-                _currentCol >= this.width? false :
-                    this.grid[_startRow][_currentCol].type === 'entry';
-            while (_currentCellEntry) {
+            while (_currentCol < this.width &&
+                   this.grid[_startRow][_currentCol].type === 'entry') {
                 _runLength += 1;
                 _currentCol += 1;
-                _currentCellEntry = 
-                    _currentCol >= this.width? false : 
-                        this.grid[_startRow][_currentCol].type === 'entry';
             }
         }
 
         if (_runLength > 9) return false;
+
+        // Build a combined list of all coordinates changing state
+        // (primary + mirror) to check for sidelong collisions.
+        const allCoordsToCheck = [];
+        for (const coord of coords) {
+            allCoordsToCheck.push({r: coord.r, c: coord.c, dir: _direction});
+            const mirrored = this.getSymmetricCoords(coord.r, coord.c);
+            allCoordsToCheck.push(
+                {r: mirrored.r, c: mirrored.c, dir: _direction});
+        }
+
+        // Run the sidelong fusion prevention guard across both clusters
+        for (const item of allCoordsToCheck) {
+            // Safety boundary check
+            if (item.r < 1 || item.r > this.height - 1 ||
+                item.c < 1 || item.c > this.width - 1) {
+                    return false;
+                }
+            
+            // If the cell is already an entry cell, skipping is fine
+            // (safe intersection)
+            if (this.grid[item.r][item.c].type === 'entry') {
+                continue;
+            }
+
+            if (item.dir === 'vertical') {
+                const leftNeighbor = (item.c - 1 < 0)?
+                    'blank' : this.grid[item.r][item.c - 1].type;
+                const rightNeighbor = (item.c + 1 >= this.width)?
+                    'blank' : this.grid[item.r][item.c + 1].type;
+                if (leftNeighbor === 'entry' || rightNeighbor === 'entry') {
+                    return false;
+                }
+            } else {
+                // item.dir === 'horizontal'
+                const topNeighbor = (item.r - 1 < 0)?
+                    'blank' : this.grid[item.r - 1][item.c].type;
+                const bottomNeighbor = (item.r + 1 >= this.height)?
+                    'blank' : this.grid[item.r + 1][item.c].type;
+                if (topNeighbor === 'entry' || bottomNeighbor === 'entry') {
+                    return false;
+                }
+            }
+        }
 
         return true;
     }
